@@ -19,7 +19,7 @@ def td3_critic_update(key:Any, critic: Model, critic_target: Model, actor_target
                       replay_data:ReplayBufferSamples, gamma:float, target_policy_noise: float, target_noise_clip: float):
 
     # Select action according to policy and add clipped noise
-    noise = jax.random.normal(key) * target_policy_noise
+    noise = jax.random.normal(key, shape=replay_data.actions.shape) * jnp.sqrt(target_policy_noise)
     noise = jnp.clip(noise, -target_noise_clip, target_noise_clip)
     next_actions = jnp.clip((actor_target(replay_data.next_observations) + noise), -1, 1)
 
