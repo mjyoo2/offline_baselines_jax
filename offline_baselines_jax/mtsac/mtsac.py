@@ -31,7 +31,7 @@ def log_ent_coef_update(key:Any, log_ent_coef: Model, actor:Model , target_entro
         actions_pi = dist.sample(seed=key)
         log_prob = dist.log_prob(actions_pi)
 
-        ent_coef = jnp.exp(log_ent_coef.apply_fn({'params': ent_params}, task_id))
+        ent_coef = log_ent_coef.apply_fn({'params': ent_params}, task_id)
         ent_coef_loss = -(ent_coef * (target_entropy + log_prob)).mean()
 
         return ent_coef_loss, {'ent_coef': ent_coef.mean(), 'ent_coef_loss': ent_coef_loss}
