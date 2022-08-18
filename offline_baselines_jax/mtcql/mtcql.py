@@ -144,11 +144,11 @@ def sac_critic_update(key:Any, actor: Model, critic: Model, critic_target: Model
 
 
 def target_update(critic: Model, critic_target: Model, tau: float) -> Model:
-    new_target_params = jax.tree_multimap(lambda p, tp: p * tau + tp * (1 - tau), critic.params, critic_target.params)
+    new_target_params = jax.tree_map(lambda p, tp: p * tau + tp * (1 - tau), critic.params, critic_target.params)
     return critic_target.replace(params=new_target_params)
 
 def param_clip(log_alpha_coef: Model, a_max: float) -> Model:
-    new_log_alpha_params = jax.tree_multimap(lambda p: jnp.clip(p, a_max=jnp.log(a_max)), log_alpha_coef.params)
+    new_log_alpha_params = jax.tree_map(lambda p: jnp.clip(p, a_max=jnp.log(a_max)), log_alpha_coef.params)
     return log_alpha_coef.replace(params=new_log_alpha_params)
 
 @functools.partial(jax.jit, static_argnames=('gamma', 'target_entropy', 'tau', 'target_update_cond', 'entropy_update',

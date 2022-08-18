@@ -21,6 +21,20 @@ from stable_baselines3.common.logger import Logger, configure
 from offline_baselines_jax.common.type_aliases import GymEnv, Schedule, TensorDict, TrainFreq, TrainFrequencyUnit
 
 
+def get_dummy_inputs(observation_space: gym.spaces, action_space: gym.spaces = None):
+    if isinstance(observation_space, gym.spaces.Dict):
+        observation = observation_space.sample()
+        for key, _ in observation_space.spaces.items():
+            observation[key] = np.expand_dims(observation[key], axis=0)
+    else:
+        observation = np.expand_dims(observation_space.sample(), axis=0)
+
+    if action_space is not None:
+        action = np.expand_dims(action_space.sample(), axis=0)
+        return observation, action
+
+    return observation, None
+
 def set_random_seed(seed: int) -> None:
     """
     Seed the different random generators.

@@ -21,7 +21,7 @@ from offline_baselines_jax.common.jax_layers import (
     default_init,
 )
 from offline_baselines_jax.common.type_aliases import Schedule, Params
-
+from offline_baselines_jax.common.utils import get_dummy_inputs
 
 @functools.partial(jax.jit, static_argnames=('actor_apply_fn'))
 def sample_actions(actor_apply_fn: Callable[..., Any], actor_params: Params,
@@ -53,10 +53,8 @@ class Actor(nn.Module):
         # Save arguments to re-create object at loading
         features = self.features_extractor(observations)
         action_dim = get_action_dim(self.action_space)
-        latent_pi = create_mlp(-1, self.net_arch, self.activation_fn, squash_output=True)(features)
-
-        mu = nn.Dense(action_dim, kernel_init=default_init())(latent_pi)
-        return mu
+        action = create_mlp(action_dim, self.net_arch, self.activation_fn, squash_output=True)(features)
+        return action
 
 class Critic(nn.Module):
     features_extractor: nn.Module
@@ -78,12 +76,8 @@ class DoubleCritic(nn.Module):
 
     @nn.compact
     def __call__(self, states, actions):
-        VmapCritic = nn.vmap(Critic,
-                             variable_axes={'params': 0},
-                             split_rngs={'params': True},
-                             in_axes=None,
-                             out_axes=0,
-                             axis_size=self.n_critics)
+        VmapCritic = nn.vmap(Critic, variable_axes={'params': 0}, split_rngs={'params': True}, in_axes=None,
+                             out_axes=0, axis_size=self.n_critics)
         qs = VmapCritic(self.features_extractor, self.net_arch, self.activation_fn)(states, actions)
         return qs
 
@@ -125,7 +119,6 @@ class TD3Policy(object):
     ):
         self.observation_space = observation_space
         self.action_space = action_space
-
         self.rng, actor_key, critic_key, features_key = jax.random.split(key, 4)
 
         # Default network architecture, from the original paper
@@ -139,35 +132,18 @@ class TD3Policy(object):
             features_extractor_kwargs = {}
 
         actor_arch, critic_arch = get_actor_critic_arch(net_arch)
-
         features_extractor_def = features_extractor_class(_observation_space=observation_space, **features_extractor_kwargs)
         actor_def = Actor(features_extractor=features_extractor_def, action_space=action_space,
                           net_arch=actor_arch, activation_fn=activation_fn)
         critic_def = DoubleCritic(features_extractor=features_extractor_def, net_arch=critic_arch,
                                   activation_fn=activation_fn, n_critics=n_critics)
 
-        if isinstance(observation_space, gym.spaces.Dict):
-            observation = observation_space.sample()
-            for key, _ in observation_space.spaces.items():
-                observation[key] = np.expand_dims(observation[key], axis=0)
-        else:
-            observation = np.expand_dims(observation_space.sample(), axis=0)
+        dummy_obs, dummy_act = get_dummy_inputs(observation_space, action_space)
 
-        actor = Model.create(actor_def, inputs=[actor_key, observation], tx=optax.adam(learning_rate=lr_schedule))
-        actor_target = Model.create(actor_def, inputs=[actor_key, observation], tx=optax.adam(learning_rate=lr_schedule))
-
-        if isinstance(observation_space, gym.spaces.Dict):
-            observation = observation_space.sample()
-            for key, _ in observation_space.spaces.items():
-                observation[key] = np.expand_dims(observation[key], axis=0)
-        else:
-            observation = np.expand_dims(observation_space.sample(), axis=0)
-        action = np.expand_dims(action_space.sample(), axis=0)
-
-        critic = Model.create(critic_def, inputs=[critic_key, observation, action],
-                              tx=optax.adam(learning_rate=lr_schedule))
-        critic_target = Model.create(critic_def, inputs=[critic_key, observation, action])
-
+        actor = Model.create(actor_def, inputs=[actor_key, dummy_obs], tx=optax.adam(learning_rate=lr_schedule))
+        actor_target = Model.create(actor_def, inputs=[actor_key, dummy_obs], tx=optax.adam(learning_rate=lr_schedule))
+        critic = Model.create(critic_def, inputs=[critic_key, dummy_obs, dummy_act], tx=optax.adam(learning_rate=lr_schedule))
+        critic_target = Model.create(critic_def, inputs=[critic_key, dummy_obs, dummy_act])
 
         self.actor, self.actor_target = actor, actor_target
         self.critic, self.critic_target = critic, critic_target

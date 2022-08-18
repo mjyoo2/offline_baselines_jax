@@ -8,9 +8,9 @@ import jax
 import optax
 import functools
 
+from stable_baselines3.common.noise import ActionNoise
 from offline_baselines_jax.common.policies import Model
 from offline_baselines_jax.common.buffers import ReplayBuffer
-from stable_baselines3.common.noise import ActionNoise
 from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
 from offline_baselines_jax.td3.policies import TD3Policy
@@ -37,6 +37,7 @@ def td3_critic_update(key:Any, critic: Model, critic_target: Model, actor_target
         for q in current_q:
             critic_loss = critic_loss + jnp.mean(jnp.square(q - target_q_values))
         critic_loss = critic_loss / len(current_q)
+
         return critic_loss, {'critic_loss': critic_loss, 'current_q': current_q.mean()}
 
     new_critic, info = critic.apply_gradient(critic_loss_fn)
@@ -68,7 +69,7 @@ def td3_actor_update(actor: Model, critic: Model, replay_data:ReplayBufferSample
 
 
 def target_update(model: Model, target: Model, tau: float) -> Model:
-    new_target_params = jax.tree_multimap(lambda p, tp: p * tau + tp * (1 - tau), model.params, target.params)
+    new_target_params = jax.tree_map(lambda p, tp: p * tau + tp * (1 - tau), model.params, target.params)
     return target.replace(params=new_target_params)
 
 

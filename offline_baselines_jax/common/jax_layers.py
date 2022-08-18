@@ -110,12 +110,12 @@ class MLP(nn.Module):
             x = nn.tanh(x)
         return x
 
-def create_mlp(output_dim: int, net_arch: List[int], activation_fn: Type[nn.Module] = nn.relu,
+def create_mlp(output_dim: int, net_arch: List[int], activation_fn: Type[nn.Module] = nn.relu, last_activation: bool = False,
                squash_output: bool = False) -> nn.Module:
     if output_dim > 0:
         net_arch = list(net_arch)
         net_arch.append(output_dim)
-    return MLP(net_arch, activation_fn, squash_output)
+    return MLP(net_arch, activation_fn, squash_output, last_activation)
 
 
 class CombinedExtractor(BaseFeaturesExtractor):

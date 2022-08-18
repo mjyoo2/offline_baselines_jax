@@ -90,7 +90,7 @@ def sac_critic_update(key:Any, actor: Model, critic: Model, critic_target: Model
 
 
 def target_update(critic: Model, critic_target: Model, tau: float) -> Model:
-    new_target_params = jax.tree_multimap(lambda p, tp: p * tau + tp * (1 - tau), critic.params, critic_target.params)
+    new_target_params = jax.tree_map(lambda p, tp: p * tau + tp * (1 - tau), critic.params, critic_target.params)
     return critic_target.replace(params=new_target_params)
 
 
