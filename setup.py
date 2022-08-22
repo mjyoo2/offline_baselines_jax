@@ -10,12 +10,12 @@ setup(
     packages=[package for package in find_packages() if package.startswith("offline_baselines_jax")],
     package_data={"offline_baselines_jax": ["py.typed", "version.txt"]},
     install_requires=[
-        "stable_baselines3==1.4.0",
-        "jax==0.3.4",
-        "jaxlib==0.3.2",
-        "flax==0.4.0",
+        # "stable_baselines3==1.4.0",
+        # "jax==0.3.4",
+        # "jaxlib==0.3.2",
+        # "flax==0.4.0",
         "tensorflow_probability",
-        'optax==0.1.1'
+        # 'optax==0.1.1'
     ],
     description="Jax version of implementations of offline reinforcement learning algorithms.",
     author="Minjong Yoo",

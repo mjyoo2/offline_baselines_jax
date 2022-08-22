@@ -15,6 +15,8 @@ from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
 from offline_baselines_jax.sac.policies import SACPolicy
 
+def l2_loss(x):
+    return (x ** 2).mean()
 
 class LogEntropyCoef(nn.Module):
     init_value: float = 1.0
@@ -48,8 +50,8 @@ def sac_actor_update(key: int, actor: Model, critic:Model, log_ent_coef: Model, 
 
         q_values_pi = critic(replay_data.observations, actions_pi)
         min_qf_pi = jnp.min(q_values_pi, axis=0)
-
-        actor_loss = (ent_coef * log_prob - min_qf_pi).mean()
+        l2_reg = sum(l2_loss(w) for w in jax.tree_leaves(actor_params))
+        actor_loss = (ent_coef * log_prob - min_qf_pi).mean() + l2_reg * 1e-3
         return actor_loss, {'actor_loss': actor_loss, 'entropy': -log_prob}
 
     new_actor, info = actor.apply_gradient(actor_loss_fn)
@@ -66,6 +68,7 @@ def sac_critic_update(key:Any, actor: Model, critic: Model, critic_target: Model
     next_q_values = jnp.min(next_q_values, axis=0)
 
     ent_coef = jnp.exp(log_ent_coef())
+
     # add entropy term
     next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
     # td error + entropy term
@@ -74,13 +77,15 @@ def sac_critic_update(key:Any, actor: Model, critic: Model, critic_target: Model
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         # Get current Q-values estimates for each critic network
         # using action from the replay buffer
-        current_q= critic.apply_fn({'params': critic_params}, replay_data.observations, replay_data.actions)
+        current_q = critic.apply_fn({'params': critic_params}, replay_data.observations, replay_data.actions)
 
         # Compute critic loss
         critic_loss = 0
         for q in current_q:
             critic_loss = critic_loss + jnp.mean(jnp.square(q - target_q_values))
-        critic_loss = critic_loss / len(current_q)
+
+        l2_reg = sum(l2_loss(w) for w in jax.tree_leaves(critic_params))
+        critic_loss = critic_loss / len(current_q) + l2_reg * 1e-3
         return critic_loss, {'critic_loss': critic_loss, 'current_q': current_q.mean()}
 
     new_critic, info = critic.apply_gradient(critic_loss_fn)
@@ -107,6 +112,7 @@ def _update_jit(
     rng, key = jax.random.split(rng, 2)
     new_actor, actor_info = sac_actor_update(key, actor, new_critic, log_ent_coef, replay_data)
     rng, key = jax.random.split(rng, 2)
+
     if entropy_update:
         new_temp, ent_info = log_ent_coef_update(key, log_ent_coef, new_actor, target_entropy, replay_data)
     else:

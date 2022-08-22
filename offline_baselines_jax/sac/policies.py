@@ -38,6 +38,40 @@ def sample_actions(rng: int, actor_apply_fn: Callable[..., Any], actor_params: P
     rng, key = jax.random.split(rng)
     return rng, dist.sample(seed=key)
 
+class TanhBijector:
+    def __init__(self, epsilon: float = 1e-6):
+        super().__init__()
+        self.epsilon = epsilon
+
+    @staticmethod
+    def forward(x: th.Tensor) -> th.Tensor:
+        return th.tanh(x)
+
+    @staticmethod
+    def atanh(x: th.Tensor) -> th.Tensor:
+        """
+        Inverse of Tanh
+        Taken from Pyro: https://github.com/pyro-ppl/pyro
+        0.5 * torch.log((1 + x ) / (1 - x))
+        """
+        return 0.5 * (x.log1p() - (-x).log1p())
+
+    @staticmethod
+    def inverse(y: th.Tensor) -> th.Tensor:
+        """
+        Inverse tanh.
+        :param y:
+        :return:
+        """
+        eps = th.finfo(y.dtype).eps
+        # Clip the action to avoid NaN
+        return TanhBijector.atanh(y.clamp(min=-1.0 + eps, max=1.0 - eps))
+
+    def log_prob_correction(self, x: th.Tensor) -> th.Tensor:
+        # Squash correction (from original SAC implementation)
+        return th.log(1.0 - th.tanh(x) ** 2 + self.epsilon)
+
+
 class Actor(nn.Module):
     """
     Actor network (policy) for SAC.
@@ -171,9 +205,7 @@ class SACPolicy(object):
     def predict(self, observation: jnp.ndarray, deterministic: bool = False) -> np.ndarray:
         actions = self._predict(observation)
         if isinstance(self.action_space, gym.spaces.Box):
-            # Actions could be on arbitrary scale, so clip the actions to avoid
-            # out of bound error (e.g. if sampling from a Gaussian distribution)
-            actions = np.clip(actions, self.action_space.low, self.action_space.high)
+            actions = self.unscale_action(actions)
         return actions, None
 
     def scale_action(self, action: np.ndarray) -> np.ndarray:
