@@ -36,41 +36,7 @@ def sample_actions(rng: int, actor_apply_fn: Callable[..., Any], actor_params: P
                     observations: np.ndarray,) -> Tuple[int, jnp.ndarray]:
     dist = actor_apply_fn({'params': actor_params}, observations)
     rng, key = jax.random.split(rng)
-    return rng, dist.sample(seed=key)
-
-class TanhBijector:
-    def __init__(self, epsilon: float = 1e-6):
-        super().__init__()
-        self.epsilon = epsilon
-
-    @staticmethod
-    def forward(x: th.Tensor) -> th.Tensor:
-        return th.tanh(x)
-
-    @staticmethod
-    def atanh(x: th.Tensor) -> th.Tensor:
-        """
-        Inverse of Tanh
-        Taken from Pyro: https://github.com/pyro-ppl/pyro
-        0.5 * torch.log((1 + x ) / (1 - x))
-        """
-        return 0.5 * (x.log1p() - (-x).log1p())
-
-    @staticmethod
-    def inverse(y: th.Tensor) -> th.Tensor:
-        """
-        Inverse tanh.
-        :param y:
-        :return:
-        """
-        eps = th.finfo(y.dtype).eps
-        # Clip the action to avoid NaN
-        return TanhBijector.atanh(y.clamp(min=-1.0 + eps, max=1.0 - eps))
-
-    def log_prob_correction(self, x: th.Tensor) -> th.Tensor:
-        # Squash correction (from original SAC implementation)
-        return th.log(1.0 - th.tanh(x) ** 2 + self.epsilon)
-
+    return rng, dist.sample(seed=key), jnp.tanh(dist.distribution.mean())
 
 class Actor(nn.Module):
     """
@@ -195,15 +161,18 @@ class SACPolicy(object):
         self.actor = actor
         self.critic, self.critic_target = critic, critic_target
 
-    def _predict(self, observation: jnp.ndarray) -> np.ndarray:
-        rng, actions = sample_actions(self.rng, self.actor.apply_fn, self.actor.params, observation)
+    def _predict(self, observation: jnp.ndarray, deterministic: bool = False) -> np.ndarray:
+        rng, actions, mu = sample_actions(self.rng, self.actor.apply_fn, self.actor.params, observation)
 
         self.rng = rng
-        actions = np.asarray(actions)
+        if deterministic:
+            actions = np.asarray(mu)
+        else:
+            actions = np.asarray(actions)
         return actions
 
     def predict(self, observation: jnp.ndarray, deterministic: bool = False) -> np.ndarray:
-        actions = self._predict(observation)
+        actions = self._predict(observation, deterministic)
         if isinstance(self.action_space, gym.spaces.Box):
             actions = self.unscale_action(actions)
         return actions, None

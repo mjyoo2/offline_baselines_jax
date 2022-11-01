@@ -443,6 +443,7 @@ class DictReplayBuffer(ReplayBuffer):
             dones=self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices]).reshape(
                 -1, 1
             ),
+
             rewards=self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
         )
 
