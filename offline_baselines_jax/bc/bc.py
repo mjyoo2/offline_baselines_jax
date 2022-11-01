@@ -10,8 +10,7 @@ import functools
 import copy
 
 from offline_baselines_jax.common.policies import Model
-from offline_baselines_jax.common.buffers import ReplayBuffer, ModelBasedDictReplayBuffer
-from stable_baselines3.common.noise import ActionNoise
+from offline_baselines_jax.common.buffers import ReplayBuffer
 from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
 from offline_baselines_jax.td3.policies import TD3Policy
