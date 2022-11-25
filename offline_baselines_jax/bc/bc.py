@@ -10,7 +10,7 @@ import functools
 import copy
 
 from offline_baselines_jax.common.policies import Model
-from offline_baselines_jax.common.buffers import ReplayBuffer
+from offline_baselines_jax.common.buffers import ReplayBuffer, BCReplayBuffer
 from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
 from offline_baselines_jax.td3.policies import TD3Policy
@@ -96,7 +96,7 @@ class BC(OffPolicyAlgorithm):
         gamma: float = 0.99,
         train_freq: Union[int, Tuple[int, str]] = (1, 'episode'),
         gradient_steps: int = -1,
-        replay_buffer_class: Optional[ReplayBuffer] = None,
+        replay_buffer_class: Optional[BCReplayBuffer] = BCReplayBuffer,
         replay_buffer_kwargs: Optional[Dict[str, Any]] = None,
         optimize_memory_usage: bool = False,
         tensorboard_log: Optional[str] = None,
@@ -128,7 +128,7 @@ class BC(OffPolicyAlgorithm):
             optimize_memory_usage=optimize_memory_usage,
             supported_action_spaces=(gym.spaces.Box, gym.spaces.Discrete),
             support_multi_env=True,
-            without_exploration=True,
+            without_exploration=without_exploration,
         )
         if _init_setup_model:
             self._setup_model()

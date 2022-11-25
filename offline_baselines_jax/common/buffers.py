@@ -447,7 +447,6 @@ class DictReplayBuffer(ReplayBuffer):
             rewards=self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
         )
 
-
 class TaskDictReplayBuffer(object):
     def __init__(
             self,
@@ -513,3 +512,44 @@ class TaskDictReplayBuffer(object):
 
         return DictReplayBufferSamples(observations=observations, actions=actions, next_observations=next_observations,
                                        dones=dones, rewards=rewards)
+
+class BCReplayBuffer(DictReplayBuffer):
+    def add(
+        self,
+        obs: Dict[str, np.ndarray],
+        next_obs: Dict[str, np.ndarray],
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: List[Dict[str, Any]],
+        task_embeddings: Dict[str, np.ndarray] = None,
+    ) -> None:
+        # Copy to avoid modification by reference
+        for key in self.observations.keys():
+            # Reshape needed when using multiple envs with discrete observations
+            # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+            if isinstance(self.observation_space.spaces[key], spaces.Discrete):
+                obs[key] = obs[key].reshape((self.n_envs,) + self.obs_shape[key])
+            self.observations[key][self.pos] = np.array(obs[key])
+
+        for key in self.next_observations.keys():
+            if isinstance(self.observation_space.spaces[key], spaces.Discrete):
+                next_obs[key] = next_obs[key].reshape((self.n_envs,) + self.obs_shape[key])
+            self.next_observations[key][self.pos] = np.array(next_obs[key]).copy()
+
+        # Same reshape, for actions
+        if isinstance(self.action_space, spaces.Discrete):
+            action = action.reshape((self.n_envs, self.action_dim))
+
+        self.actions[self.pos] = np.array(infos[0]['expert_action']).copy()
+        self.rewards[self.pos] = np.array(reward).copy()
+        self.dones[self.pos] = np.array(done).copy()
+
+        if self.handle_timeout_termination:
+            self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
+
+
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+            self.pos = 0
