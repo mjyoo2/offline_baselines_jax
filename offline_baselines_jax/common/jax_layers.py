@@ -99,23 +99,33 @@ class MLP(nn.Module):
     activation_fn: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     squash_output: bool = False
     last_activation: bool = False
+    layer_norm: bool = False
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         for i, size in enumerate(self.net_arch):
             x = nn.Dense(size, kernel_init=default_init())(x)
+            if i + 1 < len(self.net_arch) and self.layer_norm:
+                x = nn.LayerNorm()(x)
             if i + 1 < len(self.net_arch) or self.last_activation:
                 x = self.activation_fn(x)
         if self.squash_output:
             x = nn.tanh(x)
         return x
 
-def create_mlp(output_dim: int, net_arch: List[int], activation_fn: Type[nn.Module] = nn.relu, last_activation: bool = False,
-               squash_output: bool = False) -> nn.Module:
+
+def create_mlp(
+        output_dim: int,
+        net_arch: List[int],
+        activation_fn: Type[nn.Module] = nn.relu,
+        last_activation: bool = False,
+        squash_output: bool = False,
+        layer_norm: bool = False
+) -> nn.Module:
     if output_dim > 0:
         net_arch = list(net_arch)
         net_arch.append(output_dim)
-    return MLP(net_arch, activation_fn, squash_output, last_activation)
+    return MLP(net_arch, activation_fn, squash_output, last_activation, layer_norm)
 
 
 class CombinedExtractor(BaseFeaturesExtractor):

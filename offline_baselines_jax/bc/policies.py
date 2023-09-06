@@ -95,7 +95,6 @@ class BCPolicy(object):
         activation_fn: Type[nn.Module] = nn.relu,
         features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
         features_extractor_kwargs: Optional[Dict[str, Any]] = None,
-        n_critics: int = 2,
     ):
         self.observation_space = observation_space
         self.action_space = action_space
