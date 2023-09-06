@@ -186,8 +186,6 @@ class DiffusionBC(OffPolicyAlgorithm):
         )
         if _init_setup_model:
             self._setup_model()
-        self.total_denoise_steps = self.policy.total_denoise_steps
-        self.noise_dim = self.policy.noise_dim
 
     def _setup_model(self) -> None:
         super(DiffusionBC, self)._setup_model()
@@ -210,8 +208,8 @@ class DiffusionBC(OffPolicyAlgorithm):
                 self.actor,
                 replay_data,
                 self.policy.ddpm_schedule,
-                self.total_denoise_steps,
-                self.noise_dim,
+                self.policy.total_denoise_steps,
+                self.policy.noise_dim,
             )
             self.policy.actor = new_actor
 
