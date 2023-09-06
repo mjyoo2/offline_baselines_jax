@@ -13,7 +13,7 @@ from offline_baselines_jax.common.policies import Model
 from offline_baselines_jax.common.buffers import ReplayBuffer, BCReplayBuffer
 from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
-from offline_baselines_jax.td3.policies import TD3Policy
+from offline_baselines_jax.bc.policies import BCPolicy
 
 
 def l2_loss(x):
@@ -23,12 +23,10 @@ def l2_loss(x):
 def bc_actor_update(actor: Model, replay_data:ReplayBufferSamples):
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         # Compute actor loss
-
-        l2_reg = sum(l2_loss(w) for w in jax.tree_leaves(actor_params))
         actions_pi = actor.apply_fn({'params': actor_params}, replay_data.observations)
 
         bc_loss = jnp.mean(jnp.square(actions_pi - replay_data.actions))
-        actor_loss = bc_loss + l2_reg
+        actor_loss = bc_loss
 
         return actor_loss, {'actor_loss': actor_loss}
 
@@ -86,7 +84,7 @@ class BC(OffPolicyAlgorithm):
 
     def __init__(
         self,
-        policy: Union[str, Type[TD3Policy]],
+        policy: Union[str, Type[BCPolicy]],
         env: Union[GymEnv, str],
         learning_rate: Union[float, Schedule] = 1e-4,
         buffer_size: int = 1_000_000,  # 1e6
@@ -105,6 +103,7 @@ class BC(OffPolicyAlgorithm):
         verbose: int = 0,
         seed: int = 0,
         _init_setup_model: bool = True,
+        without_exploration: bool = False,
     ):
         super(BC, self).__init__(
             policy,

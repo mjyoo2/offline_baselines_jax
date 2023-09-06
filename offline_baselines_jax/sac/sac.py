@@ -9,7 +9,7 @@ import optax
 import functools
 
 from offline_baselines_jax.common.policies import Model
-from offline_baselines_jax.common.buffers import ReplayBuffer
+from offline_baselines_jax.common.buffers import ReplayBuffer, TeacherReplaybuffer
 from stable_baselines3.common.noise import ActionNoise
 from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
@@ -40,18 +40,22 @@ def log_ent_coef_update(key:Any, log_ent_coef: Model, actor:Model , target_entro
     new_ent_coef, info = log_ent_coef.apply_gradient(temperature_loss_fn)
     return new_ent_coef, info
 
-def sac_actor_update(key: int, actor: Model, critic:Model, log_ent_coef: Model, replay_data:ReplayBufferSamples):
+def sac_actor_update(key: int, actor: Model, critic:Model, log_ent_coef: Model, replay_data:ReplayBufferSamples, bc_update:bool):
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist = actor.apply_fn({'params': actor_params}, replay_data.observations)
         actions_pi = dist.sample(seed=key)
         log_prob = dist.log_prob(actions_pi)
 
         ent_coef = jnp.exp(log_ent_coef())
+        if bc_update:
+            bc_loss = jnp.mean(jnp.square(actions_pi - replay_data.teacher_actions))
+        else:
+            bc_loss = 0
 
         q_values_pi = critic(replay_data.observations, actions_pi)
         min_qf_pi = jnp.min(q_values_pi, axis=0)
         l2_reg = sum(l2_loss(w) for w in jax.tree_leaves(actor_params))
-        actor_loss = (ent_coef * log_prob - min_qf_pi).mean() + l2_reg * 1e-3
+        actor_loss = (ent_coef * log_prob - min_qf_pi).mean() + bc_loss*10 + l2_reg * 1e-3
         return actor_loss, {'actor_loss': actor_loss, 'entropy': -log_prob}
 
     new_actor, info = actor.apply_gradient(actor_loss_fn)
@@ -97,10 +101,10 @@ def target_update(critic: Model, critic_target: Model, tau: float) -> Model:
     return critic_target.replace(params=new_target_params)
 
 
-@functools.partial(jax.jit, static_argnames=('gamma', 'target_entropy', 'tau', 'target_update_cond', 'entropy_update'))
+@functools.partial(jax.jit, static_argnames=('gamma', 'target_entropy', 'tau', 'target_update_cond', 'entropy_update', 'bc_update'))
 def _update_jit(
     rng: int, actor: Model, critic: Model, critic_target: Model, log_ent_coef: Model, replay_data: ReplayBufferSamples,
-        gamma: float, target_entropy: float, tau: float, target_update_cond: bool, entropy_update: bool,
+        gamma: float, target_entropy: float, tau: float, target_update_cond: bool, entropy_update: bool, bc_update: bool,
 ) -> Tuple[int, Model, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng, 2)
     new_critic, critic_info = sac_critic_update(key, actor, critic, critic_target, log_ent_coef, replay_data, gamma)
@@ -110,7 +114,7 @@ def _update_jit(
         new_critic_target = critic_target
 
     rng, key = jax.random.split(rng, 2)
-    new_actor, actor_info = sac_actor_update(key, actor, new_critic, log_ent_coef, replay_data)
+    new_actor, actor_info = sac_actor_update(key, actor, new_critic, log_ent_coef, replay_data, bc_update)
     rng, key = jax.random.split(rng, 2)
 
     if entropy_update:
@@ -204,8 +208,11 @@ class SAC(OffPolicyAlgorithm):
         seed: int = 0,
         _init_setup_model: bool = True,
         without_exploration: bool = False,
+        bc_update: bool = False
     ):
 
+        if bc_update:
+            replay_buffer_class = TeacherReplaybuffer
         super(SAC, self).__init__(
             policy,
             env,
@@ -238,6 +245,7 @@ class SAC(OffPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.target_update_interval = target_update_interval
         self.entropy_update = True
+        self.bc_update = bc_update
 
         if _init_setup_model:
             self._setup_model()
@@ -297,7 +305,7 @@ class SAC(OffPolicyAlgorithm):
             target_update_cond = gradient_step % self.target_update_interval == 0
             self.key, new_actor, new_critic, new_critic_target, new_log_ent_coef, info \
                 = _update_jit(key, self.actor, self.critic, self.critic_target, self.log_ent_coef, replay_data,
-                              self.gamma, self.target_entropy, self.tau, target_update_cond, self.entropy_update)
+                              self.gamma, self.target_entropy, self.tau, target_update_cond, self.entropy_update, self.bc_update)
 
             ent_coef_losses.append(info['ent_coef_loss'])
             ent_coefs.append(info['ent_coef'])

@@ -9,6 +9,7 @@ from offline_baselines_jax.common.preprocessing import get_action_dim, get_obs_s
 from offline_baselines_jax.common.type_aliases import (
     DictReplayBufferSamples,
     ReplayBufferSamples,
+    TeacherReplayBufferSamples
 )
 
 import jax
@@ -513,43 +514,129 @@ class TaskDictReplayBuffer(object):
         return DictReplayBufferSamples(observations=observations, actions=actions, next_observations=next_observations,
                                        dones=dones, rewards=rewards)
 
-class BCReplayBuffer(DictReplayBuffer):
+class BCReplayBuffer(ReplayBuffer):
     def add(
         self,
-        obs: Dict[str, np.ndarray],
-        next_obs: Dict[str, np.ndarray],
+        obs: np.ndarray,
+        next_obs: np.ndarray,
         action: np.ndarray,
         reward: np.ndarray,
         done: np.ndarray,
         infos: List[Dict[str, Any]],
-        task_embeddings: Dict[str, np.ndarray] = None,
     ) -> None:
         # Copy to avoid modification by reference
-        for key in self.observations.keys():
-            # Reshape needed when using multiple envs with discrete observations
-            # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
-            if isinstance(self.observation_space.spaces[key], spaces.Discrete):
-                obs[key] = obs[key].reshape((self.n_envs,) + self.obs_shape[key])
-            self.observations[key][self.pos] = np.array(obs[key])
+        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((self.n_envs,) + self.obs_shape)
+            next_obs = next_obs.reshape((self.n_envs,) + self.obs_shape)
 
-        for key in self.next_observations.keys():
-            if isinstance(self.observation_space.spaces[key], spaces.Discrete):
-                next_obs[key] = next_obs[key].reshape((self.n_envs,) + self.obs_shape[key])
-            self.next_observations[key][self.pos] = np.array(next_obs[key]).copy()
-
-        # Same reshape, for actions
+        # Same, for actions
         if isinstance(self.action_space, spaces.Discrete):
             action = action.reshape((self.n_envs, self.action_dim))
 
-        self.actions[self.pos] = np.array(infos[0]['expert_action']).copy()
+        # Copy to avoid modification by reference
+        self.observations[self.pos] = np.array(obs).copy()
+
+        if self.optimize_memory_usage:
+            self.observations[(self.pos + 1) % self.buffer_size] = np.array(next_obs).copy()
+        else:
+            self.next_observations[self.pos] = np.array(next_obs).copy()
+        # Same reshape, for actions
+        if isinstance(self.action_space, spaces.Discrete):
+            action = action.reshape((self.n_envs, self.action_dim))
+        low, high = self.action_space.low, self.action_space.high
+        for idx in range(self.n_envs):
+            expert_action =  2.0 * ((infos[idx]['expert_action'] - low) / (high - low)) - 1.0
+            self.actions[self.pos, idx] = np.array(expert_action).copy()
         self.rewards[self.pos] = np.array(reward).copy()
         self.dones[self.pos] = np.array(done).copy()
 
         if self.handle_timeout_termination:
             self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
+        self.pos += 1
+        if self.pos == self.buffer_size:
+            self.full = True
+            self.pos = 0
+
+
+class TeacherReplaybuffer(ReplayBuffer):
+    def __init__(
+            self,
+            buffer_size: int,
+            observation_space: spaces.Space,
+            action_space: spaces.Space,
+            n_envs: int = 1,
+            optimize_memory_usage: bool = False,
+            handle_timeout_termination: bool = True,
+    ):
+        super(TeacherReplaybuffer, self).__init__(buffer_size, observation_space, action_space, n_envs, optimize_memory_usage, handle_timeout_termination)
+        self.teacher_actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=action_space.dtype)
+
+    def add(
+            self,
+            obs: Dict[str, np.ndarray],
+            next_obs: Dict[str, np.ndarray],
+            action: np.ndarray,
+            reward: np.ndarray,
+            done: np.ndarray,
+            infos: List[Dict[str, Any]],
+    ) -> None:
+        # Copy to avoid modification by reference
+        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((self.n_envs,) + self.obs_shape)
+            next_obs = next_obs.reshape((self.n_envs,) + self.obs_shape)
+
+        # Same, for actions
+        if isinstance(self.action_space, spaces.Discrete):
+            action = action.reshape((self.n_envs, self.action_dim))
+
+        # Copy to avoid modification by reference
+        self.observations[self.pos] = np.array(obs).copy()
+
+        if self.optimize_memory_usage:
+            self.observations[(self.pos + 1) % self.buffer_size] = np.array(next_obs).copy()
+        else:
+            self.next_observations[self.pos] = np.array(next_obs).copy()
+        # Same reshape, for actions
+
+        self.actions[self.pos] = np.array(action).copy()
+        self.rewards[self.pos] = np.array(reward).copy()
+        self.dones[self.pos] = np.array(done).copy()
+        low, high = self.action_space.low, self.action_space.high
+        for idx in range(self.n_envs):
+            expert_action =  2.0 * ((infos[idx]['expert_action'] - low) / (high - low)) - 1.0
+            self.teacher_actions[self.pos, idx] = np.array(expert_action).copy()
+
+        if self.handle_timeout_termination:
+            self.timeouts[self.pos] = np.array([info.get("TimeLimit.truncated", False) for info in infos])
 
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
             self.pos = 0
+
+    def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> TeacherReplayBufferSamples:
+        return super(TeacherReplaybuffer, self).sample(batch_size=batch_size, env=env)
+
+    def _get_samples(self, batch_inds: np.ndarray, env: Optional[VecNormalize] = None) -> TeacherReplayBufferSamples:
+        # Sample randomly the env idx
+        env_indices = np.random.randint(0, high=self.n_envs, size=(len(batch_inds),))
+
+        if self.optimize_memory_usage:
+            next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :], env)
+        else:
+            next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
+
+        data = (
+            self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
+            self.actions[batch_inds, env_indices, :],
+            next_obs,
+            # Only use dones that are not due to timeouts
+            # deactivated by default (timeouts is initialized as an array of False)
+            (self.dones[batch_inds, env_indices] * (1 - self.timeouts[batch_inds, env_indices])).reshape(-1, 1),
+            self._normalize_reward(self.rewards[batch_inds, env_indices].reshape(-1, 1), env),
+            self.teacher_actions[batch_inds, env_indices],
+        )
+        return TeacherReplayBufferSamples(*tuple(data))

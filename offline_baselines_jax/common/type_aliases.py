@@ -24,6 +24,13 @@ Schedule = Callable[[float], float]
 Params = flax.core.FrozenDict[str, Any]
 InfoDict = Dict[str, float]
 
+class TeacherReplayBufferSamples(NamedTuple):
+    observations: jnp.ndarray
+    actions: jnp.ndarray
+    next_observations: jnp.ndarray
+    dones: jnp.ndarray
+    rewards: jnp.ndarray
+    teacher_actions: jnp.ndarray
 
 class ReplayBufferSamples(NamedTuple):
     observations: jnp.ndarray

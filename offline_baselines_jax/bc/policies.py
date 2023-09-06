@@ -137,7 +137,7 @@ class BCPolicy(object):
         if isinstance(self.action_space, gym.spaces.Box):
             # Actions could be on arbitrary scale, so clip the actions to avoid
             # out of bound error (e.g. if sampling from a Gaussian distribution)
-            actions = np.clip(actions, self.action_space.low, self.action_space.high)
+            actions = self.unscale_action(actions)
         elif isinstance(self.action_space, gym.spaces.Discrete):
             actions = np.argmax(actions, axis=-1)
         return actions, None
