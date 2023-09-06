@@ -168,7 +168,7 @@ class DiffusionPolicy(object):
         sqrt_beta_t = self.ddpm_schedule.sqrt_beta_t
 
         # sample initial noise, y_T ~ Normal(0, 1)
-        y_t = jax.random.normal(self.rng, shape=(batch_size, subseq_len, self.noise_dim))
+        y_t = jax.random.normal(self.rng, shape=(batch_size, self.noise_dim))
         # y_t = jnp.repeat(y_t[:, jnp.newaxis, ...], repeats=subseq_len, axis=1)  # [b, l, d]
 
         # denoising chain
