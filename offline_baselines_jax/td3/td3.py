@@ -15,6 +15,20 @@ from offline_baselines_jax.common.off_policy_algorithm import OffPolicyAlgorithm
 from offline_baselines_jax.common.type_aliases import GymEnv, MaybeCallback, Schedule, InfoDict, ReplayBufferSamples, Params
 from offline_baselines_jax.td3.policies import TD3Policy
 
+def gradient_panelty(
+        critic: Model,
+        critic_params: Params,
+        replay_data: ReplayBufferSamples,
+):
+    def grad_env(observations: jnp.ndarray, actions: jnp.ndarray):
+        current_q = critic.apply_fn({'params': critic_params}, observations, actions)
+        return jnp.sum(jnp.mean(jnp.abs(current_q), axis=0))
+
+    grad_fn_env = jax.grad(grad_env, argnums=1)
+    grad_inputs = jax.vmap(grad_fn_env, in_axes=1)(jnp.expand_dims(replay_data.observations, axis=0), jnp.expand_dims(replay_data.actions, axis=0))
+    gradient_penalty = jnp.mean(jnp.square(jnp.clip(jnp.sqrt(jnp.sum(jnp.square(grad_inputs.reshape((grad_inputs.shape[0], -1))), axis=1) + 1e-12) - 1, a_max=1e+10, a_min=0)))
+    return gradient_penalty
+
 def td3_critic_update(key:Any, critic: Model, critic_target: Model, actor_target: Model,
                       replay_data:ReplayBufferSamples, gamma:float, target_policy_noise: float, target_noise_clip: float):
 
@@ -36,7 +50,8 @@ def td3_critic_update(key:Any, critic: Model, critic_target: Model, actor_target
         # Compute critic loss
         for q in current_q:
             critic_loss = critic_loss + jnp.mean(jnp.square(q - target_q_values))
-        critic_loss = critic_loss / len(current_q)
+        gp_loss = gradient_panelty(critic, critic_params, replay_data)
+        critic_loss = critic_loss / len(current_q) + gp_loss * 1000
 
         return critic_loss, {'critic_loss': critic_loss, 'current_q': current_q.mean()}
 

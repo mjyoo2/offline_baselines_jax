@@ -19,7 +19,7 @@ class DiffusionBetaScheduler:
             self,
             beta1: float = 1e-4,
             beta2: float = 0.02,
-            total_denoise_steps: int = 50,
+            total_denoise_steps: int = 8,
             method: str = "cosine"
     ):
         self.beta1 = beta1

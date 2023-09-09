@@ -6,6 +6,7 @@ import numpy as np
 import flax.linen as nn
 import jax.numpy as jnp
 import optax
+import functools
 
 from offline_baselines_jax.common.jax_layers import (
     BaseFeaturesExtractor,
@@ -17,10 +18,33 @@ from offline_baselines_jax.common.jax_layers import (
     default_init,
 )
 
-from offline_baselines_jax.diffusion_bc.ddpm_schedule import DiffusionBetaScheduler
+from offline_baselines_jax.diffusion_bc.ddpm_schedule import DiffusionBetaScheduler, DDPMCoefficients
 from offline_baselines_jax.common.policies import Model
 from offline_baselines_jax.common.type_aliases import Schedule
 
+
+@functools.partial(jax.jit, static_argnames=('noise_dim', 'total_denoise_steps'))
+def diffusion_infer(_rng: Any, _actor: Model, _y_t: jnp.ndarray, _observation: jnp.ndarray, noise_dim: int, total_denoise_steps: int, oneover_sqrta:jnp.ndarray,
+                    ma_over_sqrtmab_inv: jnp.ndarray, sqrt_beta_t:jnp.ndarray):
+    broadcast_shape = _observation.shape[: -1]
+
+    # denoising chain
+    for t in range(total_denoise_steps, 0, -1):
+        rng, _ = jax.random.split(_rng)
+        denoise_step = t + jnp.zeros(shape=broadcast_shape, dtype="i4")[..., jnp.newaxis]
+        z = jax.random.normal(rng, shape=(*_observation.shape[: -1], noise_dim)) if t > 0 else 0
+
+        # z = jax.random.normal(self.rng, shape=(*observation.shape[: -1], self.noise_dim))
+        pred = _actor(
+            x=_observation,
+            y=_y_t,
+            t=denoise_step,
+        )
+        eps = pred['pred']
+
+        _y_t = oneover_sqrta[t] * (_y_t - ma_over_sqrtmab_inv[t] * eps) + (sqrt_beta_t[t] * z)
+        _y_t = jnp.clip(_y_t, -2.0, 2.0)
+    return _y_t
 
 class Actor(nn.Module):
     """
@@ -41,8 +65,8 @@ class Actor(nn.Module):
     net_arch: List[int]
     total_denoise_steps: int
     activation_fn: Type[nn.Module] = nn.relu
-    embed_dim: int = 512
-    hidden_dim: int = 1024
+    embed_dim: int = 128
+    hidden_dim: int = 128
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, y: jnp.ndarray, t: jnp.ndarray) -> Dict[str, jnp.ndarray]:
@@ -115,7 +139,7 @@ class DiffusionPolicy(object):
             features_extractor_class: Type[BaseFeaturesExtractor] = FlattenExtractor,
             features_extractor_kwargs: Optional[Dict[str, Any]] = None,
             ddpm_schedule_kwargs: Optional[Dict[str, Any]] = None,
-            total_denoise_steps: int = 50
+            total_denoise_steps: int = 8
     ):
 
         if features_extractor_kwargs is None:
@@ -160,33 +184,11 @@ class DiffusionPolicy(object):
 
     def _predict(self, observation: jnp.ndarray):
         batch_size = observation.shape[0]
-        subseq_len = observation.shape[1]
-        broadcast_shape = observation.shape[: -1]
-
+        y_t = jax.random.normal(self.rng, shape=(batch_size, self.noise_dim))
         oneover_sqrta = self.ddpm_schedule.oneover_sqrta
         ma_over_sqrtmab_inv = self.ddpm_schedule.ma_over_sqrtmab_inv
         sqrt_beta_t = self.ddpm_schedule.sqrt_beta_t
-
-        # sample initial noise, y_T ~ Normal(0, 1)
-        y_t = jax.random.normal(self.rng, shape=(batch_size, self.noise_dim))
-        # y_t = jnp.repeat(y_t[:, jnp.newaxis, ...], repeats=subseq_len, axis=1)  # [b, l, d]
-
-        # denoising chain
-        for t in range(self.total_denoise_steps, 0, -1):
-            self.rng, _ = jax.random.split(self.rng)
-            denoise_step = t + jnp.zeros(shape=broadcast_shape, dtype="i4")[..., jnp.newaxis]
-            z = jax.random.normal(self.rng, shape=(*observation.shape[: -1], self.noise_dim)) if t > 0 else 0
-
-            # z = jax.random.normal(self.rng, shape=(*observation.shape[: -1], self.noise_dim))
-            pred = self.actor(
-                x=observation,
-                y=y_t,
-                t=denoise_step,
-            )
-            eps = pred['pred']
-
-            y_t = oneover_sqrta[t] * (y_t - ma_over_sqrtmab_inv[t] * eps) + (sqrt_beta_t[t] * z)
-            y_t = jnp.clip(y_t, -2.0, 2.0)
+        y_t = diffusion_infer(self.rng, self.actor, y_t, observation, self.noise_dim, self.total_denoise_steps, oneover_sqrta, ma_over_sqrtmab_inv, sqrt_beta_t)
         return y_t
 
     def predict(self, observation: jnp.ndarray, deterministic: bool = False) -> np.ndarray:
